@@ -165,3 +165,44 @@ def dar_like(obra_id: int, db: Session = Depends(get_db)):
 def ver_perfil_gosto(db: Session = Depends(get_db)):
     """Rota auxiliar: mostra o perfil de gosto aprendido."""
     return db.query(PerfilGosto).order_by(PerfilGosto.peso.desc()).all()
+
+
+# ──────────────────────────────────────────────────────────
+# 6. AGENDADOR — CURADORIA AUTOMÁTICA ÀS 04:00 AM
+# ──────────────────────────────────────────────────────────
+import schedule
+import threading
+import time
+
+
+def _rodar_curadoria_segura():
+    """Wrapper que importa e roda o curador com tratamento de erro."""
+    try:
+        from curador import rodar_curadoria
+        rodar_curadoria()
+    except Exception as e:
+        print(f"❌ Erro no agendador: {e}")
+
+
+# Agenda a curadoria diária às 04:00 AM
+schedule.every().day.at("04:00").do(_rodar_curadoria_segura)
+
+
+def _loop_agendador():
+    """Loop infinito que verifica tarefas agendadas a cada 60s."""
+    print("⏰ Agendador iniciado — curadoria programada para 04:00 AM")
+    while True:
+        schedule.run_pending()
+        time.sleep(60)
+
+
+# Inicia o agendador em uma thread daemon (morre junto com o servidor)
+threading.Thread(target=_loop_agendador, daemon=True).start()
+
+
+@app.post("/rodar-curadoria")
+def disparar_curadoria_manual():
+    """Rota para disparar a curadoria manualmente (útil para testes)."""
+    threading.Thread(target=_rodar_curadoria_segura, daemon=True).start()
+    return {"status": "Curadoria iniciada em background! 🎨"}
+
