@@ -8,15 +8,8 @@ class FeedViewModel: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
     
-    // Para desenvolvimento local, use localhost.
-    // Em produção, troque para a URL do Railway.
-    private let baseUrl: String = {
-        #if targetEnvironment(simulator)
-        return "http://127.0.0.1:8000"
-        #else
-        return "http://127.0.0.1:8000" // Trocar pela URL do Railway
-        #endif
-    }()
+    // URL do servidor no Railway
+    private let baseUrl = "https://daniart-production.up.railway.app"
     
     /// Carrega o feed de obras do dia
     func carregarFeed() async {
