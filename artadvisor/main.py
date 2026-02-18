@@ -213,6 +213,27 @@ def proxy_imagem(image_id: str):
     )
 
 
+class SeedRequest(BaseModel):
+    titulo: str
+    imagem_url: str
+    tags_extraidas: str = ""
+
+
+@app.post("/admin/seed")
+def seed_obra(payload: SeedRequest, db: Session = Depends(get_db)):
+    """Insere uma obra manualmente (para testes/seed)."""
+    nova = Obra(
+        titulo=payload.titulo,
+        imagem_url=payload.imagem_url,
+        tags_extraidas=payload.tags_extraidas,
+        data_exibicao=date.today(),
+    )
+    db.add(nova)
+    db.commit()
+    db.refresh(nova)
+    return {"status": "ok", "id": nova.id}
+
+
 # ──────────────────────────────────────────────────────────
 # 6. AGENDADOR — CURADORIA AUTOMÁTICA ÀS 04:00 AM
 # ──────────────────────────────────────────────────────────
