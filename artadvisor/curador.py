@@ -59,23 +59,26 @@ def buscar_obras_contemporaneas(termo: str, limite: int = 20) -> list[dict]:
     """
     print(f"🏛️ Buscando arte contemporânea: {termo}")
 
-    # Busca com filtros via Elasticsearch query avançada
-    params = {
+    # Busca com filtros via Elasticsearch query avançada (POST para garantir complexidade)
+    url = f"{ARTIC_API_URL}/artworks/search"
+    payload = {
         "q": termo,
-        "fields": "id,title,image_id,artist_title,date_end,style_titles,"
-                  "classification_titles,term_titles,department_title",
+        "fields": [
+            "id", "title", "image_id", "artist_title", "date_end",
+            "style_titles", "classification_titles", "term_titles", "department_title"
+        ],
         "limit": limite,
-        "query": json.dumps({
+        "query": {
             "bool": {
                 "must": [
                     {"range": {"date_end": {"gte": 2020}}},
                     {"exists": {"field": "image_id"}},
                 ],
             }
-        }),
+        },
     }
 
-    resp = requests.get(f"{ARTIC_API_URL}/artworks/search", params=params)
+    resp = requests.post(url, json=payload)
     if resp.status_code != 200:
         print(f"❌ Erro na busca: {resp.text}")
         return []
