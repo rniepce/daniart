@@ -72,7 +72,7 @@ struct ObraCard: View {
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(height: 420)
+                    .frame(height: 350)
                     .overlay(
                         ProgressView()
                             .progressViewStyle(CircularProgressViewStyle(tint: goldLight.opacity(0.5)))
@@ -82,9 +82,9 @@ struct ObraCard: View {
             case .success(let image):
                 image
                     .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(height: 420)
-                    .clipped()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity, maxHeight: 500)
+                    .background(Color.black.opacity(0.3))
                     .overlay(
                         // Degradê no fundo da imagem para legibilidade
                         LinearGradient(
@@ -103,7 +103,7 @@ struct ObraCard: View {
             case .failure:
                 Rectangle()
                     .fill(Color.white.opacity(0.04))
-                    .frame(height: 420)
+                    .frame(height: 350)
                     .overlay(
                         VStack(spacing: 8) {
                             Image(systemName: "photo.artframe")
