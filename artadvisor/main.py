@@ -2,13 +2,16 @@
 # FastAPI server com banco de dados SQLAlchemy.
 # Serve o feed diário de obras e aprende o gosto via likes.
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, Date
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from datetime import date
 from pydantic import BaseModel
 import os
+import requests as http_requests
+import io
 
 # ──────────────────────────────────────────────────────────
 # 1. CONFIGURAÇÃO DO BANCO DE DADOS
@@ -122,12 +125,25 @@ def raiz():
 
 
 @app.get("/feed/hoje", response_model=list[ObraResponse])
-def obter_feed_do_dia(db: Session = Depends(get_db)):
+def obter_feed_do_dia(request: Request, db: Session = Depends(get_db)):
     """
     O iPhone chama esta rota ao abrir o app.
     Retorna todas as obras curadas para hoje.
+    As imagens são servidas via proxy pela nossa API.
     """
-    return db.query(Obra).filter(Obra.data_exibicao == date.today()).all()
+    obras = db.query(Obra).filter(Obra.data_exibicao == date.today()).all()
+    base = str(request.base_url).rstrip("/")
+
+    resultado = []
+    for obra in obras:
+        resultado.append(ObraResponse(
+            id=obra.id,
+            titulo=obra.titulo,
+            imagem_url=f"{base}/imagem/{obra.imagem_url}",
+            tags_extraidas=obra.tags_extraidas,
+            curtiu=obra.curtiu,
+        ))
+    return resultado
 
 
 @app.post("/obra/{obra_id}/like", response_model=LikeResponse)
@@ -165,6 +181,36 @@ def dar_like(obra_id: int, db: Session = Depends(get_db)):
 def ver_perfil_gosto(db: Session = Depends(get_db)):
     """Rota auxiliar: mostra o perfil de gosto aprendido."""
     return db.query(PerfilGosto).order_by(PerfilGosto.peso.desc()).all()
+
+
+@app.get("/imagem/{image_id}")
+def proxy_imagem(image_id: str):
+    """
+    Proxy de imagens do Art Institute of Chicago.
+    Busca a imagem via IIIF e retransmite para o iPhone.
+    Isso contorna o bloqueio de 403 que o IIIF faz em clientes diretos.
+    """
+    iiif_url = f"https://www.artic.edu/iiif/2/{image_id}/full/843,/0/default.jpg"
+
+    resp = http_requests.get(
+        iiif_url,
+        headers={
+            "User-Agent": "ArtAdvisor/1.0 (Educational Project)",
+            "Referer": "https://www.artic.edu/",
+            "Accept": "image/jpeg,image/*",
+        },
+        stream=True,
+        timeout=15,
+    )
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Imagem indisponível")
+
+    return StreamingResponse(
+        io.BytesIO(resp.content),
+        media_type=resp.headers.get("Content-Type", "image/jpeg"),
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 # ──────────────────────────────────────────────────────────

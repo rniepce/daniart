@@ -3,7 +3,7 @@
 # 1. Lê o perfil de gosto (o que ela tem curtido).
 # 2. Pede ao GPT um termo de busca em inglês.
 # 3. Busca obras na API gratuita do Art Institute of Chicago.
-# 4. GPT-4o Vision filtra e seleciona as melhores pinturas.
+# 4. GPT cria títulos em português e extrai tags de estilo.
 # 5. Salva no banco para a API servir de manhã.
 
 import os
@@ -23,19 +23,19 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Art Institute of Chicago API (gratuita, sem chave!)
 ARTIC_API_URL = "https://api.artic.edu/api/v1"
-ARTIC_IMAGE_URL = "https://www.artic.edu/iiif/2"
+ARTIC_IIIF_URL = "https://www.artic.edu/iiif/2"
 
 
 def buscar_obras_chicago(termo: str, limite: int = 15) -> list[dict]:
     """
     Busca obras na API do Art Institute of Chicago.
-    Retorna lista com título, image_id e URL da imagem em alta resolução.
+    Filtra apenas obras com imagem disponível (is_public_domain).
     """
     print(f"🏛️ Buscando no Art Institute of Chicago: {termo}")
 
     params = {
         "q": termo,
-        "fields": "id,title,image_id,artist_title,style_titles,classification_titles",
+        "fields": "id,title,image_id,artist_title,style_titles,classification_titles,is_public_domain,term_titles",
         "limit": limite,
     }
 
@@ -44,71 +44,81 @@ def buscar_obras_chicago(termo: str, limite: int = 15) -> list[dict]:
         print(f"❌ Erro na busca: {resp.text}")
         return []
 
-    dados = resp.json().get("data", [])
+    dados = resp.json()
+    iiif_url = dados.get("config", {}).get("iiif_url", ARTIC_IIIF_URL)
+    items = dados.get("data", [])
 
     # Filtra apenas obras que têm imagem disponível
     obras = []
-    for item in dados:
-        if not item.get("image_id"):
+    for item in items:
+        image_id = item.get("image_id")
+        if not image_id:
             continue
 
-        image_url = f"{ARTIC_IMAGE_URL}/{item['image_id']}/full/843,/0/default.jpg"
+        # URL da imagem via IIIF
+        image_url = f"{iiif_url}/{image_id}/full/843,/0/default.jpg"
+
+        # Extrai estilos/termos disponíveis da API
+        estilos = item.get("style_titles", []) or []
+        termos = item.get("term_titles", []) or []
+        classificacao = item.get("classification_titles", []) or []
+        todas_tags = estilos + termos + classificacao
 
         obras.append({
-            "titulo": item.get("title", "Sem título"),
-            "artista": item.get("artist_title", "Desconhecido"),
-            "url": image_url,
-            "estilos": item.get("style_titles", []),
-            "classificacao": item.get("classification_titles", []),
+            "titulo_original": item.get("title", "Untitled"),
+            "artista": item.get("artist_title", "Unknown"),
+            "image_id": image_id,
+            "image_url": image_url,
+            "tags_api": todas_tags[:5],  # Máximo 5 tags da API
         })
 
     print(f"✅ Encontradas {len(obras)} obras com imagem")
     return obras
 
 
-def filtrar_com_visao(obras: list[dict]) -> list[dict]:
+def traduzir_e_taguear(obras: list[dict]) -> list[dict]:
     """
-    Envia imagens para o GPT-4o Vision.
-    Ele seleciona as melhores e extrai tags de estilo.
+    Usa o GPT para traduzir títulos e criar tags em português.
+    Não envia imagens — usa apenas os metadados da API.
+    Muito mais barato que o GPT-4o Vision!
     """
     if not obras:
         return []
 
-    print("🧠 Enviando para o GPT-4o Vision curar as melhores...")
+    print("🧠 Pedindo ao GPT para traduzir e taguear...")
 
-    conteudo = [
-        {
-            "type": "text",
-            "text": (
-                "Você é um curador de arte de elite. Analise estas obras do "
-                "Art Institute of Chicago. Selecione as 10 mais impactantes "
-                "visualmente — priorize pinturas com textura, cor vibrante e "
-                "composição marcante. Retorne um JSON com a chave 'obras' "
-                "contendo para cada obra selecionada: "
-                "'url' (URL da imagem, copie exatamente como recebeu), "
-                "'titulo' (título criativo em português), "
-                "'tags' (3 palavras-chave de estilo/cor separadas por vírgula, "
-                "ex: 'impasto, abstrato, azul')."
-            ),
-        }
-    ]
-
-    for obra in obras[:12]:
-        conteudo.append({
-            "type": "image_url",
-            "image_url": {"url": obra["url"]}
+    lista_obras = []
+    for i, obra in enumerate(obras):
+        lista_obras.append({
+            "index": i,
+            "titulo": obra["titulo_original"],
+            "artista": obra["artista"],
+            "tags_api": obra["tags_api"],
         })
 
     resposta = client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-4o-mini",
         response_format={"type": "json_object"},
-        messages=[{"role": "user", "content": conteudo}],
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "Você é um curador de arte. Receba esta lista de obras e retorne "
+                    "um JSON com a chave 'obras' contendo um array. Para cada obra, "
+                    "inclua: 'index' (o índice original), 'titulo' (título criativo "
+                    "traduzido para português, pode ser poético), 'tags' (3 palavras-chave "
+                    "de estilo/cor/técnica em português, separadas por vírgula). "
+                    "Selecione apenas as 10 mais interessantes.\n\n"
+                    f"Obras: {json.dumps(lista_obras, ensure_ascii=False)}"
+                ),
+            }
+        ],
     )
 
     resultado = json.loads(resposta.choices[0].message.content)
-    aprovadas = resultado.get("obras", [])
-    print(f"🎨 GPT-4o Vision selecionou {len(aprovadas)} obras")
-    return aprovadas
+    obras_traduzidas = resultado.get("obras", [])
+    print(f"🎨 GPT selecionou e traduziu {len(obras_traduzidas)} obras")
+    return obras_traduzidas
 
 
 def rodar_curadoria():
@@ -157,22 +167,27 @@ def rodar_curadoria():
             print("⚠️ Nenhuma obra encontrada. Encerrando.")
             return
 
-        # 4. GPT-4o Vision filtra as melhores
-        obras_aprovadas = filtrar_com_visao(obras_encontradas)
+        # 4. GPT traduz e tagueia (sem Vision — usa metadados)
+        obras_traduzidas = traduzir_e_taguear(obras_encontradas)
 
         # 5. Salva no Banco de Dados
         hoje = date.today()
-        for obra_data in obras_aprovadas:
-            nova_obra = Obra(
-                titulo=obra_data.get("titulo", "Sem título"),
-                imagem_url=obra_data.get("url", ""),
-                tags_extraidas=obra_data.get("tags", ""),
-                data_exibicao=hoje,
-            )
-            db.add(nova_obra)
+        for obra_trad in obras_traduzidas:
+            idx = obra_trad.get("index", 0)
+            if idx < len(obras_encontradas):
+                obra_original = obras_encontradas[idx]
+                # Salva o image_id para proxy pela nossa API
+                nova_obra = Obra(
+                    titulo=obra_trad.get("titulo", "Sem título"),
+                    imagem_url=obra_original["image_id"],  # Salva apenas o ID
+                    tags_extraidas=obra_trad.get("tags", ""),
+                    data_exibicao=hoje,
+                )
+                db.add(nova_obra)
 
         db.commit()
-        print(f"\n🎨 Curadoria concluída! {len(obras_aprovadas)} obras salvas para hoje.")
+        count = len(obras_traduzidas)
+        print(f"\n🎨 Curadoria concluída! {count} obras salvas para hoje.")
 
     except Exception as e:
         print(f"❌ Erro na curadoria: {e}")
