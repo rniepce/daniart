@@ -68,7 +68,7 @@ def buscar_obras_contemporaneas(termo: str, limite: int = 20) -> list[dict]:
         "query": json.dumps({
             "bool": {
                 "must": [
-                    {"range": {"date_end": {"gte": 1950}}},
+                    {"range": {"date_end": {"gte": 2020}}},
                     {"exists": {"field": "image_id"}},
                 ],
             }
